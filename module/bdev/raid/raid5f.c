@@ -12,6 +12,8 @@
 #include "spdk/likely.h"
 #include "spdk/log.h"
 #include "spdk/xor.h"
+#include "jerasure.h"
+#include "reed_sol.h"
 
 /* Maximum concurrent full stripe writes per io channel */
 #define RAID5F_MAX_STRIPES 32
@@ -49,7 +51,7 @@ struct stripe_request {
 	struct chunk *parity_chunk;
 
 	/* Buffer for stripe parity */
-	void *parity_buf;
+	void **parity_buf;
 
 	/* Buffer for stripe io metadata parity */
 	void *parity_md_buf;
@@ -151,7 +153,7 @@ raid5f_xor_stripe(struct stripe_request *stripe_req)
 	struct spdk_bdev_io *bdev_io = spdk_bdev_io_from_ctx(raid_io);
 	size_t remaining = raid_bdev->strip_size << raid_bdev->blocklen_shift;
 	uint8_t n_src = raid5f_stripe_data_chunks_num(raid_bdev);
-	void *dest = stripe_req->parity_buf;
+	void *dest = stripe_req->parity_buf[0];
 	size_t alignment_mask = spdk_xor_get_optimal_alignment() - 1;
 	void *raid_md = spdk_bdev_io_get_md_buf(bdev_io);
 	uint32_t raid_md_size = spdk_bdev_get_md_size(&raid_bdev->bdev);
@@ -191,7 +193,7 @@ raid5f_xor_stripe(struct stripe_request *stripe_req)
 	while (remaining > 0) {
 		size_t len = remaining;
 		uint8_t i;
-
+		int *matrix;
 		for (i = 0; i < n_src; i++) {
 			struct iov_iter *iov_iter = &r5ch->chunk_iov_iters[i];
 			struct iovec *iov = &iov_iter->iovs[iov_iter->index];
@@ -202,12 +204,26 @@ raid5f_xor_stripe(struct stripe_request *stripe_req)
 
 		assert(len > 0);
 
+		/**
+		 * n_src number of data chunk
+                 * coding chunk is 1
+                 * word size is 16
+                 */
+		SPDK_ERRLOG("n_src is %d remaining %d data chunk %d size %d\n",n_src, remaining, raid5f_stripe_data_chunks_num(raid_bdev), sizeof(r5ch->chunk_xor_buffers[0]));
+		matrix = reed_sol_vandermonde_coding_matrix(n_src, 1, 16);
+
+  		jerasure_print_matrix(matrix, 1, n_src, 16);
+		jerasure_matrix_encode(n_src, 1, 16, matrix, r5ch->chunk_xor_buffers, &dest, remaining);
+
+		//SPDK_ERRLOG("LEN %lu DEST %s\n",len,dest);
+#if 0
 		ret = spdk_xor_gen(dest, r5ch->chunk_xor_buffers, n_src, len);
 		if (spdk_unlikely(ret)) {
 			SPDK_ERRLOG("stripe xor failed\n");
 			return ret;
 		}
-
+#endif
+		SPDK_ERRLOG("spdk_xor_gen generated successfully.\n");
 		for (i = 0; i < n_src; i++) {
 			struct iov_iter *iov_iter = &r5ch->chunk_iov_iters[i];
 			struct iovec *iov = &iov_iter->iovs[iov_iter->index];
@@ -392,7 +408,7 @@ raid5f_stripe_request_map_iovecs(struct stripe_request *stripe_req)
 		}
 	}
 
-	stripe_req->parity_chunk->iovs[0].iov_base = stripe_req->parity_buf;
+	stripe_req->parity_chunk->iovs[0].iov_base = stripe_req->parity_buf[0];
 	stripe_req->parity_chunk->iovs[0].iov_len = raid_bdev->strip_size <<
 			raid_bdev->blocklen_shift;
 	stripe_req->parity_chunk->md_buf = stripe_req->parity_md_buf;
@@ -553,12 +569,12 @@ raid5f_stripe_request_free(struct stripe_request *stripe_req)
 		free(chunk->iovs);
 	}
 
-	spdk_dma_free(stripe_req->parity_buf);
+	spdk_dma_free(stripe_req->parity_buf[0]);
 	spdk_dma_free(stripe_req->parity_md_buf);
 
 	free(stripe_req);
 }
-
+int num_coding_chunk = 1; //TODO it should come from config, just for an experiment
 static struct stripe_request *
 raid5f_stripe_request_alloc(struct raid5f_io_channel *r5ch)
 {
@@ -567,7 +583,7 @@ raid5f_stripe_request_alloc(struct raid5f_io_channel *r5ch)
 	uint32_t raid_io_md_size = spdk_bdev_get_md_size(&raid_bdev->bdev);
 	struct stripe_request *stripe_req;
 	struct chunk *chunk;
-
+	int i;
 	stripe_req = calloc(1, sizeof(*stripe_req) +
 			    sizeof(struct chunk) * raid_bdev->num_base_bdevs);
 	if (!stripe_req) {
@@ -584,11 +600,14 @@ raid5f_stripe_request_alloc(struct raid5f_io_channel *r5ch)
 			goto err;
 		}
 	}
-
-	stripe_req->parity_buf = spdk_dma_malloc(raid_bdev->strip_size << raid_bdev->blocklen_shift,
-				 r5f_info->buf_alignment, NULL);
-	if (!stripe_req->parity_buf) {
-		goto err;
+	SPDK_ERRLOG("strip_size %d blocklen_shift %d result %d\n",raid_bdev->strip_size, raid_bdev->blocklen_shift, (raid_bdev->strip_size << raid_bdev->blocklen_shift));
+	stripe_req->parity_buf = spdk_dma_malloc(sizeof(char *)*num_coding_chunk, r5f_info->buf_alignment, NULL);
+	for (i = 0; i < num_coding_chunk; i++) {
+		stripe_req->parity_buf[i] = spdk_dma_malloc(raid_bdev->strip_size << raid_bdev->blocklen_shift,
+				r5f_info->buf_alignment, NULL);
+		if (!stripe_req->parity_buf[i]) {
+			goto err;
+		}
 	}
 
 	if (raid_io_md_size != 0) {
