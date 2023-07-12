@@ -161,6 +161,7 @@ endif
 ifeq ($(CONFIG_RDMA),y)
 SYS_LIBS += -libverbs -lrdmacm
 endif
+SYS_LIBS += -lJerasure
 
 ifeq ($(CONFIG_URING),y)
 SYS_LIBS += -luring
