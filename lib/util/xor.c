@@ -131,7 +131,7 @@ int
 spdk_jerasure_parity(uint32_t num_src, uint32_t num_parity, uint32_t word_sz, void **sources, void *dest, uint32_t len)
 {
     int *matrix = reed_sol_vandermonde_coding_matrix(num_src, num_parity, word_sz);
-    jerasure_matrix_encode(num_src, num_parity, matrix, sources, &dest, len);
+    jerasure_matrix_encode(num_src, num_parity, word_sz, matrix, sources, &dest, len);
     return 0;
 }
 

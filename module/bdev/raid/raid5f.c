@@ -15,6 +15,8 @@
 
 /* Maximum concurrent full stripe writes per io channel */
 #define RAID5F_MAX_STRIPES 32
+#define MAX_PARITY 8
+#define NUM_PARITY 1 /* TODO will come from config space */
 
 struct chunk {
 	/* Corresponds to base_bdev index */
@@ -58,7 +60,7 @@ struct stripe_request {
 	union {
 		struct {
 			/* Buffer for stripe parity */
-			void *parity_buf;
+			void **parity_buf;
 
 			/* Buffer for stripe io metadata parity */
 			void *parity_md_buf;
@@ -86,6 +88,7 @@ struct stripe_request {
 
 	/* Array of chunks corresponding to base_bdevs */
 	struct chunk chunks[0];
+    int num_parity;
 };
 
 struct raid5f_info {
@@ -509,10 +512,11 @@ raid5f_stripe_request_map_iovecs(struct stripe_request *stripe_req)
 			return -EINVAL;
 		}
 	}
-
-	stripe_req->parity_chunk->iovs[0].iov_base = stripe_req->write.parity_buf;
-	stripe_req->parity_chunk->iovs[0].iov_len = raid_bdev->strip_size << raid_bdev->blocklen_shift;
-	stripe_req->parity_chunk->iovcnt = 1;
+    for (i = 0; i < stripe_req->num_parity; i++) {
+        stripe_req->parity_chunk->iovs[i].iov_base = stripe_req->write.parity_buf[i];
+        stripe_req->parity_chunk->iovs[i].iov_len = raid_bdev->strip_size << raid_bdev->blocklen_shift;
+    }
+    stripe_req->parity_chunk->iovcnt = stripe_req->num_parity;
 	stripe_req->parity_chunk->md_buf = stripe_req->write.parity_md_buf;
 
 	return 0;
@@ -563,6 +567,7 @@ raid5f_submit_write_request(struct raid_bdev_io *raid_io, uint64_t stripe_index)
 	stripe_req->parity_chunk = stripe_req->chunks + raid5f_stripe_parity_chunk_index(raid_bdev,
 				   stripe_req->stripe_index);
 	stripe_req->raid_io = raid_io;
+    stripe_req->num_parity = NUM_PARITY;
 
 	ret = raid5f_stripe_request_map_iovecs(stripe_req);
 	if (spdk_unlikely(ret)) {
@@ -713,7 +718,7 @@ raid5f_stripe_request_alloc(struct raid5f_io_channel *r5ch, enum stripe_request_
 	}
 
 	if (type == STRIPE_REQ_WRITE) {
-		stripe_req->write.parity_buf = spdk_dma_malloc(raid_bdev->strip_size << raid_bdev->blocklen_shift,
+		stripe_req->write.parity_buf = spdk_dma_malloc(stripe_req->num_parity*(raid_bdev->strip_size << raid_bdev->blocklen_shift),
 					       r5f_info->buf_alignment, NULL);
 		if (!stripe_req->write.parity_buf) {
 			goto err;
