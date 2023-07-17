@@ -27,7 +27,7 @@ extern "C" {
  * \return 0 on success, negative error code otherwise.
  */
 int spdk_xor_gen(void *dest, void **sources, uint32_t n, uint32_t len);
-
+int spdk_ec_gen(void **dest, uint32_t ncode, void **sources, uint32_t n, uint32_t len);
 /**
  * Get the optimal buffer alignment for XOR functions.
  *

@@ -249,7 +249,7 @@ raid5f_xor_stripe_continue(struct stripe_request *stripe_req)
 		stripe_req->chunk_xor_buffers[i] = r5ch->chunk_xor_buffers[i];
 	}
 
-	ret = spdk_accel_submit_xor(r5ch->accel_ch, r5ch->chunk_xor_buffers[n_src],
+	ret = spdk_accel_submit_ec(r5ch->accel_ch, (r5ch->chunk_xor_buffers + n_src), stripe_req->num_parity,
 				    stripe_req->chunk_xor_buffers, n_src, stripe_req->xor.len,
 				    raid5f_xor_stripe_cb, stripe_req);
 	if (spdk_unlikely(ret)) {
@@ -269,7 +269,10 @@ raid5f_xor_stripe(struct stripe_request *stripe_req, stripe_req_xor_cb cb)
 	struct raid_bdev_io *raid_io = stripe_req->raid_io;
 	struct raid_bdev *raid_bdev = raid_io->raid_bdev;
 	struct spdk_bdev_io *bdev_io = spdk_bdev_io_from_ctx(raid_io);
+    /* TODO for now let's assume md is null */
+#if 0
 	void *raid_md = spdk_bdev_io_get_md_buf(bdev_io);
+#endif
 	uint32_t raid_md_size = spdk_bdev_get_md_size(&raid_bdev->bdev);
 	struct chunk *chunk;
 	uint8_t c;
@@ -283,6 +286,10 @@ raid5f_xor_stripe(struct stripe_request *stripe_req, stripe_req_xor_cb cb)
 		r5ch->chunk_xor_iovcnt[c] = chunk->iovcnt;
 		c++;
 	}
+    /**
+     * if there are multiple coding chunk then there will be multiple
+     * iovec in stripe_req->parity_chunk
+     */
 	r5ch->chunk_xor_iovs[c] = stripe_req->parity_chunk->iovs;
 	r5ch->chunk_xor_iovcnt[c] = stripe_req->parity_chunk->iovcnt;
 
@@ -294,7 +301,8 @@ raid5f_xor_stripe(struct stripe_request *stripe_req, stripe_req_xor_cb cb)
 	stripe_req->xor.remaining = raid_bdev->strip_size << raid_bdev->blocklen_shift;
 	stripe_req->xor.status = 0;
 	stripe_req->xor.cb = cb;
-
+    /* TODO for now let's assume raid_md is always NULL */
+#if 0 
 	if (raid_md != NULL) {
 		uint8_t n_src = raid5f_stripe_data_chunks_num(raid_bdev);
 		uint64_t len = raid_bdev->strip_size * raid_md_size;
@@ -321,7 +329,7 @@ raid5f_xor_stripe(struct stripe_request *stripe_req, stripe_req_xor_cb cb)
 			return;
 		}
 	}
-
+#endif
 	raid5f_xor_stripe_continue(stripe_req);
 }
 
@@ -741,7 +749,10 @@ raid5f_stripe_request_alloc(struct raid5f_io_channel *r5ch, enum stripe_request_
 		goto err;
 	}
 
-	stripe_req->chunk_xor_buffers = calloc(raid5f_stripe_data_chunks_num(raid_bdev),
+    /**
+     * TODO NUM_PARITY will come from config space
+     */
+	stripe_req->chunk_xor_buffers = calloc(raid5f_stripe_data_chunks_num(raid_bdev) + (NUM_PARITY-1),
 					       sizeof(stripe_req->chunk_xor_buffers[0]));
 	if (!stripe_req->chunk_xor_buffers) {
 		goto err;
@@ -809,7 +820,10 @@ raid5f_ioch_create(void *io_device, void *ctx_buf)
 		goto err;
 	}
 
-	r5ch->chunk_xor_buffers = calloc(raid_bdev->num_base_bdevs, sizeof(*r5ch->chunk_xor_buffers));
+    /**
+     * TODO NUM_PARITY will come from config space
+     */
+	r5ch->chunk_xor_buffers = calloc(raid_bdev->num_base_bdevs + (NUM_PARITY-1), sizeof(*r5ch->chunk_xor_buffers));
 	if (!r5ch->chunk_xor_buffers) {
 		goto err;
 	}

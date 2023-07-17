@@ -140,6 +140,9 @@ struct raid_bdev {
 	/* minimum number of viable base bdevs that are required by array to operate */
 	uint8_t				min_base_bdevs_operational;
 
+    /* actual bdev for data chunk */
+    uint8_t             mum_bdev_data_chunk;
+
 	/* Raid Level of this raid bdev */
 	enum raid_level			level;
 

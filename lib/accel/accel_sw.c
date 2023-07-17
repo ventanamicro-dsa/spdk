@@ -438,10 +438,11 @@ _sw_accel_decrypt(struct sw_accel_io_channel *sw_ch, struct spdk_accel_task *acc
 static int
 _sw_accel_xor(struct sw_accel_io_channel *sw_ch, struct spdk_accel_task *accel_task)
 {
-	return spdk_xor_gen(accel_task->d.iovs[0].iov_base,
+	return spdk_ec_gen(accel_task->ncodes.codes,
+                accel_task->ncodes.cnt,
 			    accel_task->nsrcs.srcs,
 			    accel_task->nsrcs.cnt,
-			    accel_task->d.iovs[0].iov_len);
+			    accel_task->nbytes);
 }
 
 static int

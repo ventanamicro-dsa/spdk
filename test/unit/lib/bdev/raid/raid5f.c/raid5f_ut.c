@@ -70,7 +70,12 @@ spdk_accel_submit_xor(struct spdk_io_channel *ch, void *dst, void **sources, uin
 
 	return 0;
 }
-
+int
+spdk_accel_submit_ec(struct spdk_io_channel *ch, void **dst, int ncodes, void **sources, uint32_t nsrcs,
+		      uint64_t nbytes, spdk_accel_completion_cb cb_fn, void *cb_arg)
+{
+	return 0;
+}
 void
 raid_bdev_io_complete(struct raid_bdev_io *raid_io, enum spdk_bdev_io_status status)
 {

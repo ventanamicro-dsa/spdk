@@ -318,6 +318,10 @@ int spdk_accel_submit_decompress(struct spdk_io_channel *ch, struct iovec *dst_i
 int spdk_accel_submit_xor(struct spdk_io_channel *ch, void *dst, void **sources, uint32_t nsrcs,
 			  uint64_t nbytes, spdk_accel_completion_cb cb_fn, void *cb_arg);
 
+int spdk_accel_submit_ec(struct spdk_io_channel *ch, void **dst, int ncodes,
+              void **sources, uint32_t nsrcs,
+			  uint64_t nbytes, spdk_accel_completion_cb cb_fn, void *cb_arg);
+
 /** Object grouping multiple accel operations to be executed at the same point in time */
 struct spdk_accel_sequence;
 
