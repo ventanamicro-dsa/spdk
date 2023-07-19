@@ -154,7 +154,7 @@ raid5f_chunk_stripe_req(struct chunk *chunk)
 static inline uint8_t
 raid5f_stripe_data_chunks_num(const struct raid_bdev *raid_bdev)
 {
-	return raid_bdev->min_base_bdevs_operational;
+	return raid_bdev->min_base_bdevs_operational - (NUM_PARITY -1);
 }
 
 static inline uint8_t
@@ -828,12 +828,12 @@ raid5f_ioch_create(void *io_device, void *ctx_buf)
 		goto err;
 	}
 
-	r5ch->chunk_xor_iovs = calloc(raid_bdev->num_base_bdevs, sizeof(*r5ch->chunk_xor_iovs));
+	r5ch->chunk_xor_iovs = calloc(raid_bdev->num_base_bdevs + (NUM_PARITY-1), sizeof(*r5ch->chunk_xor_iovs));
 	if (!r5ch->chunk_xor_iovs) {
 		goto err;
 	}
 
-	r5ch->chunk_xor_iovcnt = calloc(raid_bdev->num_base_bdevs, sizeof(*r5ch->chunk_xor_iovcnt));
+	r5ch->chunk_xor_iovcnt = calloc(raid_bdev->num_base_bdevs + (NUM_PARITY-1), sizeof(*r5ch->chunk_xor_iovcnt));
 	if (!r5ch->chunk_xor_iovcnt) {
 		goto err;
 	}
