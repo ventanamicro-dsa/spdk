@@ -903,8 +903,8 @@ raid5f_get_io_channel(struct raid_bdev *raid_bdev)
 
 static struct raid_bdev_module g_raid5f_module = {
 	.level = RAID5F,
-	.base_bdevs_min = 2,
-	.base_bdevs_constraint = {CONSTRAINT_MAX_BASE_BDEVS_REMOVED, 2},
+	.base_bdevs_min = 3,
+	.base_bdevs_constraint = {CONSTRAINT_MAX_BASE_BDEVS_REMOVED, 1},
 	.start = raid5f_start,
 	.stop = raid5f_stop,
 	.submit_rw_request = raid5f_submit_rw_request,
