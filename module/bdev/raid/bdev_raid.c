@@ -946,6 +946,7 @@ raid_bdev_create(const char *name, uint32_t strip_size, uint8_t num_base_bdevs,
 	struct raid_base_bdev_info *base_info;
 	uint8_t min_operational;
 
+
 	if (raid_bdev_find_by_name(name) != NULL) {
 		SPDK_ERRLOG("Duplicate raid bdev name found: %s\n", name);
 		return -EEXIST;
@@ -978,8 +979,10 @@ raid_bdev_create(const char *name, uint32_t strip_size, uint8_t num_base_bdevs,
 	switch (module->base_bdevs_constraint.type) {
 	case CONSTRAINT_MAX_BASE_BDEVS_REMOVED:
 		min_operational = num_base_bdevs - module->base_bdevs_constraint.value;
+                SPDK_ERRLOG("num_base_bdevs %d module->base_bdevs_constraint.value %d\n",num_base_bdevs,module->base_bdevs_constraint.value);
 		break;
 	case CONSTRAINT_MIN_BASE_BDEVS_OPERATIONAL:
+                SPDK_ERRLOG("module->base_bdevs_constraint.value %d\n",module->base_bdevs_constraint.value);
 		min_operational = module->base_bdevs_constraint.value;
 		break;
 	case CONSTRAINT_UNSET:

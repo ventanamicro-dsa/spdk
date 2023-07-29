@@ -15,8 +15,7 @@
 
 /* Maximum concurrent full stripe writes per io channel */
 #define RAID5F_MAX_STRIPES 32
-#define MAX_PARITY 8
-#define NUM_PARITY 1 /* TODO will come from config space */
+#define NUM_PARITY 2 /* TODO will come from config space */
 
 struct chunk {
 	/* Corresponds to base_bdev index */
@@ -85,10 +84,10 @@ struct stripe_request {
 	} xor;
 
 	TAILQ_ENTRY(stripe_request) link;
+        int num_parity;
 
 	/* Array of chunks corresponding to base_bdevs */
 	struct chunk chunks[0];
-    int num_parity;
 };
 
 struct raid5f_info {
@@ -154,7 +153,7 @@ raid5f_chunk_stripe_req(struct chunk *chunk)
 static inline uint8_t
 raid5f_stripe_data_chunks_num(const struct raid_bdev *raid_bdev)
 {
-	return raid_bdev->min_base_bdevs_operational - (NUM_PARITY -1);
+	return raid_bdev->min_base_bdevs_operational;
 }
 
 static inline uint8_t
@@ -249,7 +248,7 @@ raid5f_xor_stripe_continue(struct stripe_request *stripe_req)
 		stripe_req->chunk_xor_buffers[i] = r5ch->chunk_xor_buffers[i];
 	}
 
-	ret = spdk_accel_submit_ec(r5ch->accel_ch, (r5ch->chunk_xor_buffers + n_src), stripe_req->num_parity,
+	ret = spdk_accel_submit_ec(r5ch->accel_ch, r5ch->chunk_xor_buffers[n_src], NUM_PARITY,
 				    stripe_req->chunk_xor_buffers, n_src, stripe_req->xor.len,
 				    raid5f_xor_stripe_cb, stripe_req);
 	if (spdk_unlikely(ret)) {
@@ -269,10 +268,7 @@ raid5f_xor_stripe(struct stripe_request *stripe_req, stripe_req_xor_cb cb)
 	struct raid_bdev_io *raid_io = stripe_req->raid_io;
 	struct raid_bdev *raid_bdev = raid_io->raid_bdev;
 	struct spdk_bdev_io *bdev_io = spdk_bdev_io_from_ctx(raid_io);
-    /* TODO for now let's assume md is null */
-#if 0
 	void *raid_md = spdk_bdev_io_get_md_buf(bdev_io);
-#endif
 	uint32_t raid_md_size = spdk_bdev_get_md_size(&raid_bdev->bdev);
 	struct chunk *chunk;
 	uint8_t c;
@@ -286,10 +282,6 @@ raid5f_xor_stripe(struct stripe_request *stripe_req, stripe_req_xor_cb cb)
 		r5ch->chunk_xor_iovcnt[c] = chunk->iovcnt;
 		c++;
 	}
-    /**
-     * if there are multiple coding chunk then there will be multiple
-     * iovec in stripe_req->parity_chunk
-     */
 	r5ch->chunk_xor_iovs[c] = stripe_req->parity_chunk->iovs;
 	r5ch->chunk_xor_iovcnt[c] = stripe_req->parity_chunk->iovcnt;
 
@@ -301,8 +293,7 @@ raid5f_xor_stripe(struct stripe_request *stripe_req, stripe_req_xor_cb cb)
 	stripe_req->xor.remaining = raid_bdev->strip_size << raid_bdev->blocklen_shift;
 	stripe_req->xor.status = 0;
 	stripe_req->xor.cb = cb;
-    /* TODO for now let's assume raid_md is always NULL */
-#if 0 
+
 	if (raid_md != NULL) {
 		uint8_t n_src = raid5f_stripe_data_chunks_num(raid_bdev);
 		uint64_t len = raid_bdev->strip_size * raid_md_size;
@@ -329,7 +320,7 @@ raid5f_xor_stripe(struct stripe_request *stripe_req, stripe_req_xor_cb cb)
 			return;
 		}
 	}
-#endif
+
 	raid5f_xor_stripe_continue(stripe_req);
 }
 
@@ -520,11 +511,12 @@ raid5f_stripe_request_map_iovecs(struct stripe_request *stripe_req)
 			return -EINVAL;
 		}
 	}
-    for (i = 0; i < stripe_req->num_parity; i++) {
-        stripe_req->parity_chunk->iovs[i].iov_base = stripe_req->write.parity_buf[i];
-        stripe_req->parity_chunk->iovs[i].iov_len = raid_bdev->strip_size << raid_bdev->blocklen_shift;
-    }
-    stripe_req->parity_chunk->iovcnt = stripe_req->num_parity;
+        SPDK_ERRLOG("populate parity chunk.\n");
+        for (i = 0; i < NUM_PARITY; i++) {
+            stripe_req->parity_chunk->iovs[i].iov_base = stripe_req->write.parity_buf[i];
+            stripe_req->parity_chunk->iovs[i].iov_len = raid_bdev->strip_size << raid_bdev->blocklen_shift;
+        }
+        stripe_req->parity_chunk->iovcnt = NUM_PARITY;
 	stripe_req->parity_chunk->md_buf = stripe_req->write.parity_md_buf;
 
 	return 0;
@@ -575,7 +567,7 @@ raid5f_submit_write_request(struct raid_bdev_io *raid_io, uint64_t stripe_index)
 	stripe_req->parity_chunk = stripe_req->chunks + raid5f_stripe_parity_chunk_index(raid_bdev,
 				   stripe_req->stripe_index);
 	stripe_req->raid_io = raid_io;
-    stripe_req->num_parity = NUM_PARITY;
+    	stripe_req->num_parity = NUM_PARITY;
 
 	ret = raid5f_stripe_request_map_iovecs(stripe_req);
 	if (spdk_unlikely(ret)) {
@@ -654,13 +646,14 @@ raid5f_submit_rw_request(struct raid_bdev_io *raid_io)
 	uint64_t stripe_index = offset_blocks / r5f_info->stripe_blocks;
 	uint64_t stripe_offset = offset_blocks % r5f_info->stripe_blocks;
 	int ret;
-
+	SPDK_ERRLOG("raid5f_submit_rw_request.\n");
 	switch (bdev_io->type) {
 	case SPDK_BDEV_IO_TYPE_READ:
 		assert(bdev_io->u.bdev.num_blocks <= raid_bdev->strip_size);
 		ret = raid5f_submit_read_request(raid_io, stripe_index, stripe_offset);
 		break;
 	case SPDK_BDEV_IO_TYPE_WRITE:
+                SPDK_ERRLOG("SPDK_BDEV_IO_TYPE_WRITE .\n");
 		assert(stripe_offset == 0);
 		assert(bdev_io->u.bdev.num_blocks == r5f_info->stripe_blocks);
 		ret = raid5f_submit_write_request(raid_io, stripe_index);
@@ -726,14 +719,14 @@ raid5f_stripe_request_alloc(struct raid5f_io_channel *r5ch, enum stripe_request_
 	}
 
 	if (type == STRIPE_REQ_WRITE) {
-		stripe_req->write.parity_buf = spdk_dma_malloc(stripe_req->num_parity*(raid_bdev->strip_size << raid_bdev->blocklen_shift),
+		stripe_req->write.parity_buf = spdk_dma_malloc(NUM_PARITY*(raid_bdev->strip_size << raid_bdev->blocklen_shift),
 					       r5f_info->buf_alignment, NULL);
 		if (!stripe_req->write.parity_buf) {
 			goto err;
 		}
 
 		if (raid_io_md_size != 0) {
-			stripe_req->write.parity_md_buf = spdk_dma_malloc(raid_bdev->strip_size * raid_io_md_size,
+			stripe_req->write.parity_md_buf = spdk_dma_malloc(NUM_PARITY*(raid_bdev->strip_size * raid_io_md_size),
 							  r5f_info->buf_alignment, NULL);
 			if (!stripe_req->write.parity_md_buf) {
 				goto err;
@@ -749,10 +742,7 @@ raid5f_stripe_request_alloc(struct raid5f_io_channel *r5ch, enum stripe_request_
 		goto err;
 	}
 
-    /**
-     * TODO NUM_PARITY will come from config space
-     */
-	stripe_req->chunk_xor_buffers = calloc(raid5f_stripe_data_chunks_num(raid_bdev) + (NUM_PARITY-1),
+	stripe_req->chunk_xor_buffers = calloc(raid5f_stripe_data_chunks_num(raid_bdev),
 					       sizeof(stripe_req->chunk_xor_buffers[0]));
 	if (!stripe_req->chunk_xor_buffers) {
 		goto err;
@@ -813,31 +803,28 @@ raid5f_ioch_create(void *io_device, void *ctx_buf)
 
 		TAILQ_INSERT_HEAD(&r5ch->free_stripe_requests.write, stripe_req, link);
 	}
-
+	SPDK_ERRLOG("num_base_bdev %d\n",raid_bdev->num_base_bdevs);
 	r5ch->accel_ch = spdk_accel_get_io_channel();
 	if (!r5ch->accel_ch) {
 		SPDK_ERRLOG("Failed to get accel framework's IO channel\n");
 		goto err;
 	}
 
-    /**
-     * TODO NUM_PARITY will come from config space
-     */
-	r5ch->chunk_xor_buffers = calloc(raid_bdev->num_base_bdevs + (NUM_PARITY-1), sizeof(*r5ch->chunk_xor_buffers));
+	r5ch->chunk_xor_buffers = calloc(raid_bdev->num_base_bdevs, sizeof(*r5ch->chunk_xor_buffers));
 	if (!r5ch->chunk_xor_buffers) {
 		goto err;
 	}
 
-	r5ch->chunk_xor_iovs = calloc(raid_bdev->num_base_bdevs + (NUM_PARITY-1), sizeof(*r5ch->chunk_xor_iovs));
+	r5ch->chunk_xor_iovs = calloc(raid_bdev->num_base_bdevs, sizeof(*r5ch->chunk_xor_iovs));
 	if (!r5ch->chunk_xor_iovs) {
 		goto err;
 	}
 
-	r5ch->chunk_xor_iovcnt = calloc(raid_bdev->num_base_bdevs + (NUM_PARITY-1), sizeof(*r5ch->chunk_xor_iovcnt));
+	r5ch->chunk_xor_iovcnt = calloc(raid_bdev->num_base_bdevs, sizeof(*r5ch->chunk_xor_iovcnt));
 	if (!r5ch->chunk_xor_iovcnt) {
 		goto err;
 	}
-
+	SPDK_ERRLOG("io channel create successful.\n");
 	return 0;
 err:
 	SPDK_ERRLOG("Failed to initialize io channel\n");
@@ -902,7 +889,7 @@ raid5f_stop(struct raid_bdev *raid_bdev)
 	struct raid5f_info *r5f_info = raid_bdev->module_private;
 
 	spdk_io_device_unregister(r5f_info, raid5f_io_device_unregister_done);
-
+        SPDK_ERRLOG("raid5f_stop.\n");
 	return false;
 }
 
@@ -916,8 +903,8 @@ raid5f_get_io_channel(struct raid_bdev *raid_bdev)
 
 static struct raid_bdev_module g_raid5f_module = {
 	.level = RAID5F,
-	.base_bdevs_min = 3,
-	.base_bdevs_constraint = {CONSTRAINT_MAX_BASE_BDEVS_REMOVED, 1},
+	.base_bdevs_min = 2,
+	.base_bdevs_constraint = {CONSTRAINT_MAX_BASE_BDEVS_REMOVED, 2},
 	.start = raid5f_start,
 	.stop = raid5f_stop,
 	.submit_rw_request = raid5f_submit_rw_request,
