@@ -1033,7 +1033,7 @@ raid_bdev_create(const char *name, uint32_t strip_size, uint8_t num_base_bdevs,
 	raid_bdev->strip_size_kb = strip_size;
 	raid_bdev->state = RAID_BDEV_STATE_CONFIGURING;
 	raid_bdev->level = level;
-	raid_bdev->min_base_bdevs_operational = min_operational -1;
+	raid_bdev->min_base_bdevs_operational = min_operational;
 
 	raid_bdev_gen = &raid_bdev->bdev;
 

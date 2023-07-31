@@ -15,7 +15,7 @@
 
 /* Maximum concurrent full stripe writes per io channel */
 #define RAID5F_MAX_STRIPES 32
-#define NUM_PARITY 2 /* TODO will come from config space */
+#define NUM_PARITY 1 /* TODO will come from config space */
 
 struct chunk {
 	/* Corresponds to base_bdev index */
@@ -649,8 +649,10 @@ raid5f_submit_rw_request(struct raid_bdev_io *raid_io)
 	SPDK_ERRLOG("raid5f_submit_rw_request.\n");
 	switch (bdev_io->type) {
 	case SPDK_BDEV_IO_TYPE_READ:
+                SPDK_ERRLOG("bdev_io->u.bdev.num_blocks %d raid_bdev->strip_size %d\n",bdev_io->u.bdev.num_blocks,raid_bdev->strip_size);
 		assert(bdev_io->u.bdev.num_blocks <= raid_bdev->strip_size);
 		ret = raid5f_submit_read_request(raid_io, stripe_index, stripe_offset);
+		SPDK_ERRLOG("ret %d\n",ret);
 		break;
 	case SPDK_BDEV_IO_TYPE_WRITE:
                 SPDK_ERRLOG("SPDK_BDEV_IO_TYPE_WRITE .\n");
@@ -753,7 +755,7 @@ raid5f_stripe_request_alloc(struct raid5f_io_channel *r5ch, enum stripe_request_
 	if (!stripe_req->chunk_xor_md_buffers) {
 		goto err;
 	}
-
+	SPDK_ERRLOG("stripe create successful.\n");
 	return stripe_req;
 err:
 	raid5f_stripe_request_free(stripe_req);
@@ -869,7 +871,7 @@ raid5f_start(struct raid_bdev *raid_bdev)
 
 	spdk_io_device_register(r5f_info, raid5f_ioch_create, raid5f_ioch_destroy,
 				sizeof(struct raid5f_io_channel), NULL);
-
+	SPDK_ERRLOG("raid5f_start.\n");
 	return 0;
 }
 
