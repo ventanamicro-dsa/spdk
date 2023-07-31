@@ -15,7 +15,7 @@
 
 /* Maximum concurrent full stripe writes per io channel */
 #define RAID5F_MAX_STRIPES 32
-#define NUM_PARITY 1 /* TODO will come from config space */
+#define NUM_PARITY 2 /* TODO will come from config space */
 
 struct chunk {
 	/* Corresponds to base_bdev index */
@@ -906,7 +906,7 @@ raid5f_get_io_channel(struct raid_bdev *raid_bdev)
 static struct raid_bdev_module g_raid5f_module = {
 	.level = RAID5F,
 	.base_bdevs_min = 3,
-	.base_bdevs_constraint = {CONSTRAINT_MAX_BASE_BDEVS_REMOVED, 1},
+	.base_bdevs_constraint = {CONSTRAINT_MAX_BASE_BDEVS_REMOVED, NUM_PARITY},
 	.start = raid5f_start,
 	.stop = raid5f_stop,
 	.submit_rw_request = raid5f_submit_rw_request,
