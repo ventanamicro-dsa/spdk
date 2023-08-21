@@ -131,17 +131,20 @@ static int
 spdk_jerasure_parity(uint32_t num_src, uint32_t num_parity, uint32_t word_sz, void **sources, void **dest, uint32_t len)
 {
     int *matrix = reed_sol_vandermonde_coding_matrix(num_src, num_parity, word_sz);
+    printf("data %d coding %d \n",num_src,num_parity);
+    jerasure_print_matrix(matrix, num_parity, num_src, word_sz);
     jerasure_matrix_encode(num_src, num_parity, word_sz, matrix, sources, dest, len);
+    printf("jerasure_matrix_encode DONE.\n");
     return 0;
 }
 
 int
 spdk_ec_gen(void **dest, uint32_t ncodes, void **sources, uint32_t n, uint32_t len)
 {
-	if (n < 2 || n > SPDK_XOR_MAX_SRC) {
-		return -EINVAL;
-	}
-
+	//if (n < 2 || n > SPDK_XOR_MAX_SRC) {
+	//	return -EINVAL;
+	//}
+	printf("n %d ncodes %d len %d\n",n,ncodes,len);
 	return spdk_jerasure_parity(n, ncodes, 16, sources, dest, len);
 }
 

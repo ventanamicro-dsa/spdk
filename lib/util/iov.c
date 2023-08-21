@@ -64,6 +64,7 @@ spdk_ioviter_firstv(struct spdk_ioviter *iter,
 	uint32_t i;
 
 	iter->count = count;
+        printf("count = %d\n",count);
 
 	for (i = 0; i < count; i++) {
 		it = &iter->iters[i];
@@ -72,6 +73,7 @@ spdk_ioviter_firstv(struct spdk_ioviter *iter,
 		it->idx = 0;
 		it->iov_len = iov[i][0].iov_len;
 		it->iov_base = iov[i][0].iov_base;
+		printf("i %d iov_len %d\n",i,iov[i][0].iov_len);
 	}
 
 	return spdk_ioviter_nextv(iter, out);

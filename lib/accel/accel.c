@@ -759,8 +759,8 @@ spdk_accel_submit_xor(struct spdk_io_channel *ch, void *dst, void **sources, uin
 	accel_task->nsrcs.srcs = sources;
 	accel_task->nsrcs.cnt = nsrcs;
 	accel_task->d.iovs = &accel_task->aux_iovs[SPDK_ACCEL_AUX_IOV_DST];
-    accel_task->d.iovs[0].iov_base = dst;
-    accel_task->d.iovs[0].iov_len = nbytes;
+	accel_task->d.iovs[0].iov_base = dst;
+	accel_task->d.iovs[0].iov_len = nbytes;
 	accel_task->d.iovcnt = 1;
 	accel_task->nbytes = nbytes;
 	accel_task->op_code = ACCEL_OPC_XOR;
@@ -776,7 +776,6 @@ spdk_accel_submit_ec(struct spdk_io_channel *ch, void **dst, int ncodes,
               void **sources, uint32_t nsrcs,
 		      uint64_t nbytes, spdk_accel_completion_cb cb_fn, void *cb_arg)
 {
-    int i;
 	struct accel_io_channel *accel_ch = spdk_io_channel_get_ctx(ch);
 	struct spdk_accel_task *accel_task;
 
@@ -788,21 +787,15 @@ spdk_accel_submit_ec(struct spdk_io_channel *ch, void **dst, int ncodes,
 	accel_task->nsrcs.srcs = sources;
 	accel_task->nsrcs.cnt = nsrcs;
 	accel_task->d.iovs = &accel_task->aux_iovs[SPDK_ACCEL_AUX_IOV_DST];
-#if 0
-    for (i = 0; i < ncodes; i++) {
-        accel_task->d.iovs[i].iov_base = dst[i];
-        accel_task->d.iovs[i].iov_len = nbytes;
-    }
-#endif
-    accel_task->ncodes.codes = dst;
-    accel_task->ncodes.cnt = ncodes;
+
+	accel_task->ncodes.codes = dst;
+	accel_task->ncodes.cnt = ncodes;
 
 	accel_task->nbytes = nbytes;
 	accel_task->op_code = ACCEL_OPC_XOR;
 	accel_task->src_domain = NULL;
 	accel_task->dst_domain = NULL;
 	accel_task->step_cb_fn = NULL;
-
 	return accel_submit_task(accel_ch, accel_task);
 }
 
