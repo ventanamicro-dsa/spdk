@@ -1,0 +1,102 @@
+Convert SPDK raid5f to erasure code
+
+1.	Added Jerasure Support in SPDK: first clone jerasure source code and compile and install jerasure library. You can do it using ./configure; make; make install. Once jerasure install successfully then include library path in SPDK sys_lib.  You can enable it in the following file. mk/spdk.common.mk. add this line SYS_LIBS += -lJerasure
+
+2.	By default SPDK raid5f use xor to calculate parity, we need to replace it with jerasure parity calculation. Go to the file 
+lib/util/xor.c and make the following changes. 
+
+int
+spdk_jerasure_parity(uint32_t num_src, uint32_t num_parity, uint32_t word_sz, void**sources, void *dest, uint32_t len)
+{
+    int *matrix = reed_sol_vandermonde_coding_matrix(num_src, num_parity, word_sz);
+    jerasure_matrix_encode(num_src, num_parity, matrix, sources, &dest, len);
+    return 0;
+}
+
+       Next in the function of spdk_xor_gen() replace the call with spdk_jerasure_parity().
+       spdk_jerasure_parity(n, 1, 16, sources, dest, len); where n is number of data chunk,
+1 is number of coding chunk, sources is the data chunk source buffer. Dest is      destination parity buffer, len is the chunk length.
+
+Once you replace the xor call with jerasure parity call now parity will be generated using jerasure parity. Which is erasure code parity generated algorithm. So using these 2 exercise we can replace xor with erasure coding. But remember till this point
+Only one drive failure will work. As even though we enable erasure coding we pass 1 as coding chunk which only support single drive failure.
+
+
+
+Enable multiple parity jerasure:
+Most of the changes we need to add in the following file
+
+module/bdev/raid/raid5f.c
+
+change the number drive failure in the following structure
+#define NUM_PARITY 2
+static struct raid_bdev_module g_raid5f_module = {
+.base_bdevs_constraint = {CONSTRAINT_MAX_BASE_BDEVS_REMOVED, NUM_PARITY},
+}
+
+So maximum drive failure should be num parity so instead of 1 we need to change it to num_parity.
+
+
+Source code changes for multi-parity:
+
+file_name: raid5f.c
+
+1. define num parity  #define NUM_PARITY 2
+
+2. define a macro CHUNK_IN_RANGE_WITH_PARITY : it will go over all the chunks in stripe
+
+3. replace spdk_accel_submit_xor with spdk_accel_submit_ec where destination buffers has to be double pointer as it is now gonna hold multiple parity
+
+/**
+ * snip
+ */
+ret = spdk_accel_submit_ec(r5ch->accel_ch, &r5ch->chunk_xor_buffers[n_src], NUM_PARITY
+Note: I have given the description of submit_ec at last
+
+As we can see we are passing the address of an array of buffers
+
+4.Prepare parity buffers so that jerasure can place parity data on these buffer.
+      where upto index C -1 data chunk was populated so we reserve parity from C till NUM_PARITY
+      for (i = 0; i < NUM_PARITY; i++) {
+          r5ch->chunk_xor_iovs[c+i] = &stripe_req->parity_chunk->iovs[i];
+      }
+
+5. Prepare parity buffers iovec:
+      for (i = 0; i < NUM_PARITY; i++) {
+          stripe_req->parity_chunk->iovs[i].iov_base = stripe_req->write.parity_buf + i*(stripe_size << block_shift)
+      }
+
+6. Allocate Write parity buff such a way so that there will be room for multiple parity
+      
+
+7. submit_ec function:
+
+int
+spdk_accel_submit_ec(struct spdk_io_channel *ch, void **dst, int ncodes,
+              void **sources, uint32_t nsrcs,
+                      uint64_t nbytes, spdk_accel_completion_cb cb_fn, void *cb_arg)
+{
+        struct accel_io_channel *accel_ch = spdk_io_channel_get_ctx(ch);
+        struct spdk_accel_task *accel_task;
+
+        accel_task = _get_task(accel_ch, cb_fn, cb_arg);
+        if (accel_task == NULL) {
+                return -ENOMEM;
+        }
+
+        accel_task->nsrcs.srcs = sources;
+        accel_task->nsrcs.cnt = nsrcs;
+        accel_task->d.iovs = &accel_task->aux_iovs[SPDK_ACCEL_AUX_IOV_DST];
+
+        accel_task->ncodes.codes = dst;
+        accel_task->ncodes.cnt = ncodes;
+
+        accel_task->nbytes = nbytes;
+        accel_task->op_code = ACCEL_OPC_XOR;
+        accel_task->src_domain = NULL;
+        accel_task->dst_domain = NULL;
+        accel_task->step_cb_fn = NULL;
+        return accel_submit_task(accel_ch, accel_task);
+}
+
+where we allocate acel task and submit asynchroniously.
+when parity calculated successfully callback gets called and from there we submit all the chunk to ns layer.
