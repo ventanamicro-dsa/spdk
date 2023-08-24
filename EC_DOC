@@ -38,6 +38,21 @@ So maximum drive failure should be num parity so instead of 1 we need to change 
 
 Source code changes for multi-parity:
 
+Introduction: 
+The main idea is to rearrange the stripe with data and parity. As our stripe remain same we don't have to change stripe data structure rather allocation for data in a stripe
+will reduce by num_parity -1 and parity part of the stripe extend to num_parity -1
+
+For example for a 20K stripe size allocation remain same like raid5f but allotment will change
+earlier data consume 16K in a stripe and parity consume 4K (raid5f)
+Now data will consume 20K - (num_parity) and parity will consume num_parity.
+for parity 2 data consume 12K and parity consume 8K
+
+Description of main changes:
+Mainly change the config of num drive failure with num_parity. It will automatically adjust the stripe by design.
+Change the allocation of parity now the total allocation will be mum_parity*chunk_size.
+Populate data buffer followed by parity buffer in stripe. calculate parity using jerasure parity calculation and place them
+in pre allocated parity slots. Submit the stripe for writing.
+
 file_name: raid5f.c
 
 1. define num parity  #define NUM_PARITY 2
