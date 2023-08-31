@@ -439,7 +439,7 @@ spdk_bdev_writev_blocks_with_md(struct spdk_bdev_desc *desc, struct spdk_io_chan
 	io_info = test_raid_bdev_io->io_info;
 	raid_bdev = io_info->r5f_info->raid_bdev;
 
-	if (chunk == stripe_req->parity_chunk) {
+	if (chunk == stripe_req->parity_chunk[0]) {
 		if (io_info->parity_buf == NULL) {
 			goto submit;
 		}
@@ -448,7 +448,7 @@ spdk_bdev_writev_blocks_with_md(struct spdk_bdev_desc *desc, struct spdk_io_chan
 			dest_md_buf = io_info->parity_md_buf;
 		}
 	} else {
-		data_chunk_idx = chunk < stripe_req->parity_chunk ? chunk->index : chunk->index - 1;
+		data_chunk_idx = chunk < stripe_req->parity_chunk[0] ? chunk->index : chunk->index - 1;
 		data_offset = data_chunk_idx * raid_bdev->strip_size * raid_bdev->bdev.blocklen;
 		dest_buf = test_raid_bdev_io->buf + data_offset;
 		if (md_buf != NULL) {
@@ -829,7 +829,7 @@ __test_raid5f_stripe_request_map_iovecs(struct raid_bdev *raid_bdev,
 	stripe_req = raid5f_stripe_request_alloc(r5ch, STRIPE_REQ_WRITE);
 	SPDK_CU_ASSERT_FATAL(stripe_req != NULL);
 
-	stripe_req->parity_chunk = &stripe_req->chunks[raid5f_stripe_data_chunks_num(raid_bdev)];
+	stripe_req->parity_chunk[0] = &stripe_req->chunks[raid5f_stripe_data_chunks_num(raid_bdev)];
 	stripe_req->raid_io = raid_io;
 
 	ret = raid5f_stripe_request_map_iovecs(stripe_req);

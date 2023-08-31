@@ -12,6 +12,7 @@
 
 /* maximum number of source buffers */
 #define SPDK_XOR_MAX_SRC	256
+#define WORD_SIZE 16
 
 static inline bool
 is_aligned(void *ptr, size_t alignment)
@@ -127,6 +128,43 @@ do_xor_gen(void *dest, void **sources, uint32_t n, uint32_t len)
 
 #endif
 
+static void print_data_and_coding(int k, int m, int w, int size,
+		char **data, char **coding)
+{
+	int i, j, x;
+	int n, sp;
+
+	if(k > m) n = k;
+	else n = m;
+	sp = size * 2 + size/(w/8) + 8;
+
+	printf("%-*sCoding\n", sp, "Data");
+	for(i = 0; i < n; i++) {
+		if(i < k) {
+			printf("D%-2d:", i);
+			for(j=0;j< size; j+=(w/8)) {
+				printf(" ");
+				for(x=0;x < w/8;x++){
+					printf("%02x", (unsigned char)data[i][j+x]);
+				}
+			}
+			printf("    ");
+		}
+		else printf("%*s", sp, "");
+		if(i < m) {
+			printf("C%-2d:", i);
+			for(j=0;j< size; j+=(w/8)) {
+				printf(" ");
+				for(x=0;x < w/8;x++){
+					printf("%02x", (unsigned char)coding[i][j+x]);
+				}
+			}
+		}
+		printf("\n");
+	}
+	printf("\n");
+}
+
 static int
 spdk_jerasure_parity(uint32_t num_src, uint32_t num_parity, uint32_t word_sz, void **sources, void **dest, uint32_t len)
 {
@@ -135,17 +173,17 @@ spdk_jerasure_parity(uint32_t num_src, uint32_t num_parity, uint32_t word_sz, vo
     jerasure_print_matrix(matrix, num_parity, num_src, word_sz);
     jerasure_matrix_encode(num_src, num_parity, word_sz, matrix, sources, dest, len);
     printf("jerasure_matrix_encode DONE.\n");
+    //print_data_and_coding(num_src,num_parity,WORD_SIZE,len,sources,dest);
     return 0;
 }
 
 int
 spdk_ec_gen(void **dest, uint32_t ncodes, void **sources, uint32_t n, uint32_t len)
 {
-	//if (n < 2 || n > SPDK_XOR_MAX_SRC) {
-	//	return -EINVAL;
-	//}
-	printf("n %d ncodes %d len %d\n",n,ncodes,len);
-	return spdk_jerasure_parity(n, ncodes, 16, sources, dest, len);
+	if (n < 2 || n > SPDK_XOR_MAX_SRC) {
+		return -EINVAL;
+	}
+	return spdk_jerasure_parity(n, ncodes, WORD_SIZE, sources, dest, len);
 }
 
 int

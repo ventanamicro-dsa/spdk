@@ -74,7 +74,7 @@ spdk_ioviter_firstv(struct spdk_ioviter *iter,
 		it->idx = 0;
 		it->iov_len = iov[i][0].iov_len;
 		it->iov_base = iov[i][0].iov_base;
-		printf("i %d iov_len %d\n",i,iov[i][0].iov_len);
+		printf("i %d iov_len %d iov_base %px\n",i,iov[i][0].iov_len, iov[i][0].iov_base);
 	}
 
 	return spdk_ioviter_nextv(iter, out);

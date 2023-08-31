@@ -54,7 +54,7 @@ struct stripe_request {
 	uint64_t stripe_index;
 
 	/* The stripe's parity chunk */
-	struct chunk *parity_chunk;
+	struct chunk *parity_chunk[NUM_PARITY];
 
 	union {
 		struct {
@@ -121,24 +121,22 @@ struct raid5f_io_channel {
 	size_t *chunk_xor_iovcnt;
 };
 
-#define __CHUNK_IN_RANGE_WITH_PARITY(req, c) \
-	c < req->chunks + (raid5f_ch_to_r5f_info(req->r5ch)->raid_bdev->num_base_bdevs)
-
 #define __CHUNK_IN_RANGE(req, c) \
-	c < req->chunks + ((raid5f_ch_to_r5f_info(req->r5ch)->raid_bdev->num_base_bdevs) - (NUM_PARITY -1))
+	c < req->chunks + raid5f_ch_to_r5f_info(req->r5ch)->raid_bdev->num_base_bdevs
 
 #define FOR_EACH_CHUNK_FROM(req, c, from) \
-	for (c = from; __CHUNK_IN_RANGE_WITH_PARITY(req, c); c++)
+	for (c = from; __CHUNK_IN_RANGE(req, c); c++)
 
 #define FOR_EACH_CHUNK(req, c) \
 	FOR_EACH_CHUNK_FROM(req, c, req->chunks)
 
 #define __NEXT_DATA_CHUNK(req, c) \
-	c == req->parity_chunk ? c+1 : c
+	c == req->parity_chunk[0] ? c+NUM_PARITY : c
 
 #define FOR_EACH_DATA_CHUNK(req, c) \
 	for (c = __NEXT_DATA_CHUNK(req, req->chunks); __CHUNK_IN_RANGE(req, c); \
 	     c = __NEXT_DATA_CHUNK(req, c+1))
+
 
 static inline struct raid5f_info *
 raid5f_ch_to_r5f_info(struct raid5f_io_channel *r5ch)
@@ -214,7 +212,7 @@ raid5f_xor_stripe_cb(void *_stripe_req, int status)
 	struct stripe_request *stripe_req = _stripe_req;
 
 	stripe_req->xor.remaining -= stripe_req->xor.len;
-	SPDK_ERRLOG("raid5f_xor_stripe_cb remaining %d status %d\n",stripe_req->xor.remaining, status);
+
 	if (stripe_req->xor.remaining > 0) {
 		stripe_req->xor.len = spdk_ioviter_nextv(stripe_req->chunk_iov_iters,
 				      stripe_req->r5ch->chunk_xor_buffers);
@@ -249,11 +247,10 @@ raid5f_xor_stripe_continue(struct stripe_request *stripe_req)
 	for (i = 0; i < n_src; i++) {
 		stripe_req->chunk_xor_buffers[i] = r5ch->chunk_xor_buffers[i];
 	}
-	SPDK_ERRLOG("spdk_accel_submit_ec.\n");
+
 	ret = spdk_accel_submit_ec(r5ch->accel_ch, &r5ch->chunk_xor_buffers[n_src], NUM_PARITY,
 				    stripe_req->chunk_xor_buffers, n_src, stripe_req->xor.len,
 				    raid5f_xor_stripe_cb, stripe_req);
-	SPDK_ERRLOG("ret %d\n",ret);
 	if (spdk_unlikely(ret)) {
 		if (ret == -ENOMEM) {
 			TAILQ_INSERT_HEAD(&r5ch->xor_retry_queue, stripe_req, link);
@@ -274,33 +271,37 @@ raid5f_xor_stripe(struct stripe_request *stripe_req, stripe_req_xor_cb cb)
 	void *raid_md = spdk_bdev_io_get_md_buf(bdev_io);
 	uint32_t raid_md_size = spdk_bdev_get_md_size(&raid_bdev->bdev);
 	struct chunk *chunk;
+	//struct chunk *parity_chunk, *start;
 	uint8_t c,i;
+        //start = stripe_req->chunks + raid5f_stripe_parity_chunk_index(raid_bdev,
+	//				stripe_req->stripe_index);
 
 	assert(cb != NULL);
 	assert(stripe_req->type == STRIPE_REQ_WRITE);
-	SPDK_ERRLOG("raid5f_xor_stripe.\n");
+
 	c = 0;
 	FOR_EACH_DATA_CHUNK(stripe_req, chunk) {
 		r5ch->chunk_xor_iovs[c] = chunk->iovs;
 		r5ch->chunk_xor_iovcnt[c] = chunk->iovcnt;
 		c++;
 	}
-	SPDK_ERRLOG("index C %d\n",c);
+	//FOR_EACH_CHUNK_FROM(stripe_req, parity_chunk, start) {
+	//	SPDK_ERRLOG("parity chunk index %d\n",parity_chunk->index);
+	//}
 	for (i = 0; i < NUM_PARITY; i++) {
-		r5ch->chunk_xor_iovs[c+i] = &stripe_req->parity_chunk->iovs[i];
-		r5ch->chunk_xor_iovcnt[c+i] = 1;//stripe_req->parity_chunk->iovcnt;
+		r5ch->chunk_xor_iovs[c] = stripe_req->parity_chunk[i]->iovs;
+		r5ch->chunk_xor_iovcnt[c] = stripe_req->parity_chunk[i]->iovcnt;
+		c++;
 	}
-	SPDK_ERRLOG("populate parity.\n");
 	stripe_req->xor.len = spdk_ioviter_firstv(stripe_req->chunk_iov_iters,
 			      raid_bdev->num_base_bdevs,
 			      r5ch->chunk_xor_iovs,
 			      r5ch->chunk_xor_iovcnt,
 			      r5ch->chunk_xor_buffers);
-
 	stripe_req->xor.remaining = raid_bdev->strip_size << raid_bdev->blocklen_shift;
 	stripe_req->xor.status = 0;
 	stripe_req->xor.cb = cb;
-	SPDK_ERRLOG("xor.len %d xor.remaining %d\n",stripe_req->xor.len,stripe_req->xor.remaining);
+
 	if (raid_md != NULL) {
 		uint8_t n_src = raid5f_stripe_data_chunks_num(raid_bdev);
 		uint64_t len = raid_bdev->strip_size * raid_md_size;
@@ -327,7 +328,7 @@ raid5f_xor_stripe(struct stripe_request *stripe_req, stripe_req_xor_cb cb)
 			return;
 		}
 	}
-	SPDK_ERRLOG("raid5f_xor_stripe_continue.\n");
+
 	raid5f_xor_stripe_continue(stripe_req);
 }
 
@@ -517,16 +518,14 @@ raid5f_stripe_request_map_iovecs(struct stripe_request *stripe_req)
 		if (spdk_unlikely(len > 0)) {
 			return -EINVAL;
 		}
-		SPDK_ERRLOG("len %d\n",len);
 	}
-	SPDK_ERRLOG("raid_bdev->strip_size << raid_bdev->blocklen_shift %d\n",raid_bdev->strip_size << raid_bdev->blocklen_shift);
         for (i = 0; i < NUM_PARITY; i++) {
-            stripe_req->parity_chunk->iovs[i].iov_base = stripe_req->write.parity_buf + i*(raid_bdev->strip_size << raid_bdev->blocklen_shift);
-            stripe_req->parity_chunk->iovs[i].iov_len = raid_bdev->strip_size << raid_bdev->blocklen_shift;
+            stripe_req->parity_chunk[i]->iovs[0].iov_base = stripe_req->write.parity_buf + i*(raid_bdev->strip_size << raid_bdev->blocklen_shift);
+            stripe_req->parity_chunk[i]->iovs[0].iov_len = raid_bdev->strip_size << raid_bdev->blocklen_shift;
+            stripe_req->parity_chunk[i]->iovcnt = 1;
         }
-        stripe_req->parity_chunk->iovcnt = NUM_PARITY;
-	stripe_req->parity_chunk->md_buf = stripe_req->write.parity_md_buf;
-	SPDK_ERRLOG("Map iovec done.\n");
+	stripe_req->parity_chunk[0]->md_buf = stripe_req->write.parity_md_buf;
+
 	return 0;
 }
 
@@ -538,12 +537,12 @@ raid5f_stripe_request_submit_chunks(struct stripe_request *stripe_req)
 	struct chunk *chunk;
 
 	FOR_EACH_CHUNK_FROM(stripe_req, chunk, start) {
+		//chunk->iovcnt = 1;
+		SPDK_ERRLOG("chunk iovec %px iovcnt %d\n",chunk->iovs, chunk->iovcnt);
 		if (spdk_unlikely(raid5f_chunk_submit(chunk) != 0)) {
-			SPDK_ERRLOG("failed to raid5f_chunk_submit.\n");
 			break;
 		}
 		raid_io->base_bdev_io_submitted++;
-		SPDK_ERRLOG("base_bdev_io_submitted %d\n",raid_io->base_bdev_io_submitted);
 	}
 }
 
@@ -551,7 +550,7 @@ static void
 raid5f_stripe_write_request_xor_done(struct stripe_request *stripe_req, int status)
 {
 	struct raid_bdev_io *raid_io = stripe_req->raid_io;
-	SPDK_ERRLOG("raid5f_stripe_write_request_xor_done status %d\n",status);
+
 	if (status != 0) {
 		raid5f_stripe_request_release(stripe_req);
 		raid_bdev_io_complete(raid_io, SPDK_BDEV_IO_STATUS_FAILED);
@@ -566,20 +565,17 @@ raid5f_submit_write_request(struct raid_bdev_io *raid_io, uint64_t stripe_index)
 	struct raid_bdev *raid_bdev = raid_io->raid_bdev;
 	struct raid5f_io_channel *r5ch = spdk_io_channel_get_ctx(raid_io->raid_ch->module_channel);
 	struct stripe_request *stripe_req;
-	int ret;
-	int parity_idx;
+	int ret, i;
 
 	stripe_req = TAILQ_FIRST(&r5ch->free_stripe_requests.write);
 	if (!stripe_req) {
 		return -ENOMEM;
 	}
-	
-	stripe_req->stripe_index = stripe_index;
-	parity_idx = raid5f_stripe_parity_chunk_index(raid_bdev,
-					stripe_req->stripe_index);
-	SPDK_ERRLOG("parity_idx %d\n",parity_idx);
-	stripe_req->parity_chunk = stripe_req->chunks + parity_idx;
 
+	stripe_req->stripe_index = stripe_index;
+	for(i = 0; i < NUM_PARITY; i++)
+		stripe_req->parity_chunk[i] = stripe_req->chunks + (raid5f_stripe_parity_chunk_index(raid_bdev,
+				   stripe_req->stripe_index) + i);
 	stripe_req->raid_io = raid_io;
 
 	ret = raid5f_stripe_request_map_iovecs(stripe_req);
@@ -731,7 +727,6 @@ raid5f_stripe_request_alloc(struct raid5f_io_channel *r5ch, enum stripe_request_
 	}
 
 	if (type == STRIPE_REQ_WRITE) {
-		//stripe_req->write.parity_buf = spdk_dma_malloc(raid_bdev->strip_size << raid_bdev->blocklen_shift,
 		stripe_req->write.parity_buf = spdk_dma_malloc(NUM_PARITY*(raid_bdev->strip_size << raid_bdev->blocklen_shift),
 					       r5f_info->buf_alignment, NULL);
 		if (!stripe_req->write.parity_buf) {
