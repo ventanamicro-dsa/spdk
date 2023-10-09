@@ -783,10 +783,6 @@ spdk_accel_submit_ec(struct spdk_io_channel *ch, void **dst, int ncodes,
 	if (accel_task == NULL) {
 		return -ENOMEM;
 	}
-	if (ncodes == 2)
-		printf("data1 %px data2 %px data3 %px parity1 %px parity2 %px\n", sources[0],sources[1],sources[2],dst[0],dst[1]);
-	else
-		printf("data1 %px data2 %px data3 %px data4 %px parity1 %px\n", sources[0],sources[1],sources[2],sources[3],dst[0]);
 
 	accel_task->nsrcs.srcs = sources;
 	accel_task->nsrcs.cnt = nsrcs;
